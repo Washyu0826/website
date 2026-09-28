@@ -3,6 +3,7 @@ import createMiddleware from 'next-intl/middleware';
 import { createServerClient } from '@supabase/ssr';
 import { routing } from './i18n/routing';
 import { isAdminEmail } from './lib/auth/allowlist';
+import { holdingPage, lockDecision, unlockCookie, unlockParam } from './lib/site-lock';
 
 const intlMiddleware = createMiddleware(routing);
 
@@ -51,8 +52,47 @@ async function adminMiddleware(request: NextRequest) {
   return loginRedirect(request, response);
 }
 
+/**
+ * The curtain over the public site while `SITE_LOCKED` is set; see lib/site-lock.ts for what stays
+ * open behind it. 503 rather than 404 or 401: it is the status that means "not yet", so a crawler
+ * comes back instead of recording that the page is missing. Never cached, or the curtain would
+ * outlive the decision to draw it.
+ */
+function lockedResponse(request: NextRequest): NextResponse | null {
+  const { pathname, searchParams } = request.nextUrl;
+  const secret = process.env.SITE_UNLOCK;
+  const decision = lockDecision({
+    locked: process.env.SITE_LOCKED === 'true',
+    pathname,
+    presented: searchParams.get(unlockParam),
+    cookie: request.cookies.get(unlockCookie)?.value,
+    secret,
+  });
+  if (decision === 'open') return null;
+  if (decision === 'unlock') {
+    const url = request.nextUrl.clone();
+    url.searchParams.delete(unlockParam);
+    const response = NextResponse.redirect(url);
+    response.cookies.set(unlockCookie, secret!, {
+      httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: 60 * 60 * 24 * 90,
+    });
+    return response;
+  }
+  return new NextResponse(holdingPage(), {
+    status: 503,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-robots-tag': 'noindex, nofollow',
+      'retry-after': '86400',
+    },
+  });
+}
+
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const held = lockedResponse(request);
+  if (held) return held;
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return adminMiddleware(request);
   return intlMiddleware(request);
 }

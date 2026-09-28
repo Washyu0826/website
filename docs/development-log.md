@@ -919,3 +919,33 @@ Verification: the Playwright asset harness uploads a 7 MiB file and asserts it r
 PUT carrying the signed token, and never through the admin API; 118 unit tests, `npx tsc --noEmit`,
 ESLint and `npm run format:check` pass; and the signed-URL PUT, the overwrite-on-retry path and the
 download-back were each exercised against the live project.
+
+### A Curtain Over The Site While It Is Still Being Written (2026-09-28)
+
+The domain went live before the content was finished, and the site was wide open: `/robots.txt` and
+`/sitemap.xml` both answered 404 through the catch-all route, and no page carried a `noindex`. A
+half-written page that gets crawled is expensive to take back, because the index keeps it long after
+the page has been rewritten.
+
+`SITE_LOCKED=true` now answers every public page with 503 and a holding note, and `robots.txt`
+refuses everything. 503 rather than 404 or 401: it is the status that means "not yet", so a crawler
+comes back later instead of recording that the page is missing. The response is never cached, or the
+curtain would outlive the decision to draw it.
+
+Three things stay open behind it. `/admin` and its API, because the point of the curtain is to keep
+writing. Share links, because each one was handed to somebody for a particular file. And whoever has
+`SITE_UNLOCK`, who trades it once through `?unlock=` for a cookie and then browses normally; with no
+secret configured, nobody gets past, including the owner. It is a curtain, not a lock - the secret
+travels in a query string - and the thing between a stranger and the admin is still Supabase Auth.
+
+`robots.txt` is read per request rather than baked into the build, so a redeploy that reuses a cached
+build cannot leave it saying the opposite of the curtain.
+
+Verification: six unit tests over the decision itself, and the built site measured on both settings.
+Locked: `/`, `/en` and `/zh/projects` answer 503, `/admin/login` answers 200, `robots.txt` says
+`Disallow: /`, `?unlock=` with the right secret redirects and sets the cookie, the cookie then gets
+200, and a wrong secret still gets 503. Unlocked: every page answers 200 and `robots.txt` allows the
+site again. 124 unit tests, `npx tsc --noEmit` and `npm run format:check` pass.
+
+Still missing: there is no `sitemap.xml` either, and the README claims both. Worth building before
+the curtain lifts.

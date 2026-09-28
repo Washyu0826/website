@@ -49,6 +49,16 @@ npm run dev
 - `vercel.json` 設定每日 00:00 UTC 執行一次（`0 0 * * *`，Vercel Hobby 方案的上限）。Pro 方案可改成 `0 * * * *` 每小時執行；急著上線的內容可在後台直接設為 `published`。
 - 在 Vercel 專案環境變數設定 `CRON_SECRET` 後，Vercel 會自動帶入該 header；本機可用 `curl -H "Authorization: Bearer <secret>" http://127.0.0.1:3000/api/cron/publish` 測試。
 
+## 尚未開放時把網站關起來
+
+網域上線了但內容還沒寫完時，在 Vercel 設 `SITE_LOCKED=true` 再重新部署，前台每一頁都會回 503 與一張等待頁，`robots.txt` 同時改成全部拒絕。503 是「稍後再來」而不是「這頁不存在」，爬蟲會再回來，不會把半成品記進索引。
+
+後台 `/admin`、它的 API 與已經寄出去的分享連結不受影響，所以可以照常編輯內容、照常讓對方下載檔案。
+
+自己要看前台時，另外設一個 `SITE_UNLOCK=<任意字串>`，用 `https://網域/en?unlock=<那串字>` 開一次，之後就會記在 cookie 裡正常瀏覽。`SITE_UNLOCK` 留空的話沒有人能通過，包含你自己。
+
+要開放時把 `SITE_LOCKED` 刪掉或改成別的值，重新部署即可。Vercel 的環境變數要重新部署才會生效。
+
 ## Supabase 設定
 
 Schema 由 Supabase CLI migration 管理，位於 `supabase/migrations/`，可重複執行（trigger／policy 先 drop 再 create，table／index 用 `if not exists`，function 用 `create or replace`，seed 全部 `on conflict`／`where not exists`）。
