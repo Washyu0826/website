@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { absoluteUrl } from '@/lib/structured-data';
 
 /**
  * There was no robots.txt at all: the path answered 404 through the catch-all route, so every
@@ -18,5 +19,8 @@ export default function robots(): MetadataRoute.Robots {
   if (process.env.SITE_LOCKED === 'true') {
     return { rules: { userAgent: '*', disallow: '/' } };
   }
-  return { rules: { userAgent: '*', allow: '/', disallow: ['/admin', '/api/'] } };
+  return {
+    rules: { userAgent: '*', allow: '/', disallow: ['/admin', '/api/'] },
+    sitemap: absoluteUrl('/sitemap.xml'),
+  };
 }
