@@ -5,6 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Screenshot baselines are per platform, so the Linux set can only be produced on a Linux runner.
+  # Run this workflow by hand with `update_snapshots` on, then download the visual-snapshots
+  # artifact and commit it. Playwright only writes a baseline that is missing; one that merely
+  # differs is reported as a failure and left alone, which is why a manual switch is needed at all.
+  workflow_dispatch:
+    inputs:
+      update_snapshots:
+        description: Rewrite the Linux screenshot baselines instead of comparing against them
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -96,14 +106,20 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
-      # Screenshot comparison. Baselines are per platform, so the Linux set has to be committed from
-      # a CI run: if this step reports missing snapshots, download the visual-snapshots artifact and
-      # commit tests/browser/visual.spec.ts-snapshots/*-linux.png.
+      # Screenshot comparison against the committed Linux baselines.
       - name: Visual regression
+        if: ${{ !inputs.update_snapshots }}
         run: npm run test:visual
 
+      # The manual path: rewrite the baselines rather than compare against them. It is expected to
+      # end green with the new images in the artifact below; the review happens on the pull request
+      # that commits them, where every changed pixel is visible in the diff.
+      - name: Rewrite visual baselines
+        if: ${{ inputs.update_snapshots }}
+        run: npm run test:visual:update
+
       - name: Upload visual snapshots
-        if: failure()
+        if: failure() || inputs.update_snapshots
         uses: actions/upload-artifact@v4
         with:
           name: visual-snapshots
