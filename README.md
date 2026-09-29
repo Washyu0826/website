@@ -6,6 +6,8 @@
 
 需要 Node.js 22 以上。
 
+**改動依賴時請用 npm 10.x 產生 lock 檔**：`npx npm@10.9.4 install`。CI 把 npm 釘在 10.9.4，而 npm 11 解出來的相依樹少了幾個跨平台的 optional 套件，`npm ci` 會直接拒絕整棵樹。本機用 npm 11 跑過 `npm install` 之後，記得用上面那行把 lock 重新產生一次。
+
 ```powershell
 npm ci
 Copy-Item .env.example .env.local
