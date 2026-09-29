@@ -949,3 +949,31 @@ site again. 124 unit tests, `npx tsc --noEmit` and `npm run format:check` pass.
 
 Still missing: there is no `sitemap.xml` either, and the README claims both. Worth building before
 the curtain lifts.
+
+### CI Had Been Red Since The 22nd (2026-09-28)
+
+Every push since 2026-09-22 failed on GitHub, and nobody looked: the checks were being run locally
+instead, which is not the same thing. Two separate causes.
+
+**`npm ci` could not install.** `package-lock.json` had drifted out of sync with `package.json` and
+was missing five transitive packages (`@emnapi/*`, `quickjs-wasi`, `@swc/helpers`). `npm ci` refuses
+that by design, so the job died in 21 seconds before running a single check. `npm install` puts the
+lock back in step; `npm ci --dry-run` now completes.
+
+**An end-to-end test was watching an effect that had moved.** It read the scroll-driven tilt off
+`.project-row` on the projects list. That effect was deliberately taken off project and experience
+rows when the homepage started stopping one section at a time, because a per-row tilt on top of a
+per-section stop read as two things moving at once; `depth.css` keeps the scroll-driven version for
+`.article-row` alone, and demo mode has no articles, which is what CI builds. So the test was left
+asserting a tilt that nothing produces any more.
+
+Rather than delete the coverage, it now tests the beat that actually replaced it: a section title is
+tipped back and invisible while its section is below the fold, upright and solid once the page has
+arrived, and tipped back again after the page has left, which is what makes stepping back play the
+beat a second time. That exercises `section-reveal.tsx` and the `data-enter` rules in `facets.css`
+together, on demo content CI has.
+
+One local red herring on the way: running the whole suite against a server left over from earlier
+work made the command palette test fail, because that server was serving real content, which has no
+published projects to search. `reuseExistingServer` is true outside CI. The suite passes clean: 26
+end-to-end tests, 124 unit tests.

@@ -132,74 +132,66 @@ test('command palette opens with the keyboard, filters and navigates', async ({ 
   await expect(panel).toHaveCount(0);
 });
 
-/** How far a row is tipped, read back off its own matrix: the (2,3) entry of a rotateX is sin(angle). */
-async function tiltOf(page: Page, index: number) {
-  return page.evaluate(i => {
-    const row = document.querySelectorAll<HTMLElement>('.project-row')[i];
-    const style = getComputedStyle(row);
+/** How far a heading is tipped, read back off its own matrix: the (2,3) entry of a rotateX is sin(angle). */
+async function tiltOf(page: Page, selector: string) {
+  return page.evaluate(css => {
+    const element = document.querySelector<HTMLElement>(css);
+    if (!element) return null;
+    const style = getComputedStyle(element);
     const parts = style.transform.startsWith('matrix3d')
       ? style.transform.slice(9, -1).split(',').map(Number)
       : null;
     return {
-      top: Math.round(row.getBoundingClientRect().top),
       opacity: Number(style.opacity),
       // matrix3d is column-major; m[6] is the term rotateX writes.
       tilt: parts ? Math.round((Math.asin(Math.min(1, Math.abs(parts[6]))) * 180) / Math.PI) : 0,
     };
-  }, index);
+  }, selector);
 }
 
-test('rows stand up as the page reaches them, and stay up once it has passed', async ({ page }) => {
+/**
+ * The homepage plays one arrival beat per section rather than tilting each row with the scroll.
+ *
+ * This test used to read the scroll-driven tilt off `.project-row` on the projects list. That effect
+ * moved: the homepage now stops one section at a time, so a per-row tilt on top of it read as two
+ * things moving at once, and `depth.css` keeps the scroll-driven version for `.article-row` alone -
+ * a list demo mode has none of, which is what CI builds. So the thing to hold onto is the beat that
+ * actually ships: components/section-reveal.tsx writes `data-enter` on the way in and, with
+ * `replay`, on the way out again, and facets.css turns the title up on its horizontal axis from it.
+ */
+test('a section title turns up as the page arrives at it, and lies back down once it has left', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 812 });
-  // The effect is declared behind prefers-reduced-motion, so the default of the rest of this file
-  // (which asks for `reduce`) would switch it off. This is the one test that wants it running.
+  // The beat is declared behind prefers-reduced-motion, and the default for the rest of this file
+  // asks for `reduce`. This is the one test that wants it running.
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/zh/projects', { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.project-row').first()).toBeVisible();
+  await page.goto('/zh', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => document.fonts.ready);
-  const supported = await page.evaluate(() => CSS.supports('animation-timeline', 'view()'));
-  test.skip(!supported, 'this browser has no scroll-driven animations');
 
+  const section = page.locator('.experience-section').first();
+  await expect(section).toHaveCount(1);
+  const title = '.experience-section .section-title';
+
+  // Put the section well below the fold and it is waiting: tipped back, and invisible rather than
+  // faint, so nothing half-drawn is ever read.
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(250);
-  const rows = await page.locator('.project-row').count();
-  expect(rows).toBeGreaterThan(2);
+  await expect(section).toHaveAttribute('data-enter', 'out', { timeout: 5000 });
+  const waiting = await tiltOf(page, title);
+  expect(waiting).not.toBeNull();
+  expect(waiting!.tilt).toBeGreaterThan(40);
+  expect(waiting!.opacity).toBeLessThan(0.1);
 
-  // A row far below the fold has not started: it carries its ordinary styling, which is what keeps a
-  // contrast checker (and anyone whose page has stopped there) reading the whole list at full strength.
-  const resting = await tiltOf(page, rows - 1);
-  expect(resting.top).toBeGreaterThan(812);
-  expect(resting.tilt).toBe(0);
-  expect(resting.opacity).toBe(1);
+  // Bring it onto the screen and the beat plays: upright and solid when it settles.
+  await section.scrollIntoViewIfNeeded();
+  await expect(section).toHaveAttribute('data-enter', 'in', { timeout: 5000 });
+  await page.waitForTimeout(900);
+  const arrived = await tiltOf(page, title);
+  expect(arrived!.tilt).toBe(0);
+  expect(arrived!.opacity).toBeGreaterThan(0.99);
 
-  // Bring that row's top edge just inside the bottom of the screen: it is now early in its range,
-  // so it is tipped back and faint.
-  const place = (index: number, fromBottom: number) => page.evaluate(([i, gap]) => {
-    const row = document.querySelectorAll('.project-row')[i];
-    window.scrollBy(0, row.getBoundingClientRect().top - (window.innerHeight - gap));
-  }, [index, fromBottom] as const);
-  await place(rows - 1, 30);
-  await page.waitForTimeout(250);
-  const arriving = await tiltOf(page, rows - 1);
-  expect(arriving.tilt).toBeGreaterThan(4);
-  expect(arriving.opacity).toBeLessThan(0.7);
-
-  // Bring it fully into view and it is upright and solid. The extra 40px is slack: landing exactly on
-  // the end of the range leaves sub-pixel rounding to decide whether progress reads as 1 or 0.9994.
-  await page.evaluate(i => {
-    const row = document.querySelectorAll('.project-row')[i];
-    window.scrollBy(0, row.getBoundingClientRect().bottom - window.innerHeight + 40);
-  }, rows - 1);
-  await page.waitForTimeout(250);
-  const arrived = await tiltOf(page, rows - 1);
-  expect(arrived.tilt).toBe(0);
-  expect(arrived.opacity).toBeGreaterThan(0.99);
-
-  // And it stays upright on the way off the top, which is the direction the effect does not follow.
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await page.waitForTimeout(250);
-  const gone = await tiltOf(page, rows - 1);
-  expect(gone.top).toBeLessThan(arrived.top);
-  expect(gone.tilt).toBe(0);
-  expect(gone.opacity).toBeGreaterThan(0.99);
+  // And it goes back to waiting once the page has left it, so stepping back plays the beat again
+  // instead of finding the section already standing.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(section).toHaveAttribute('data-enter', 'out', { timeout: 5000 });
+  const again = await tiltOf(page, title);
+  expect(again!.tilt).toBeGreaterThan(40);
 });
